@@ -67,6 +67,9 @@
   .case.open .case-summary .chev{transform:rotate(90deg)}
   .case-body{display:none;border-top:1px solid var(--line)}
   .case.open .case-body{display:block}
+  .item-filter{padding:12px 26px 0}
+  .item-filter input{width:100%;max-width:320px;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font-size:13px;font-family:var(--sans);color:var(--ink)}
+  .item-filter input:focus{outline:2px solid var(--accent);outline-offset:1px}
   .badge.mixed{background:var(--pending-bg);color:var(--pending)}
   .case-head{padding:22px 26px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:repeat(3, 1fr);gap:18px 32px}
   .case-head .full{grid-column:1/-1}
@@ -345,6 +348,20 @@ function toggleCase(id){
 }
 window.toggleCase = toggleCase;
 
+function filterCaseItems(id, value){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const term = upper((value || "").trim());
+  const rows = el.querySelectorAll("tbody tr");
+  rows.forEach(row => {
+    const model = row.getAttribute("data-model") || "";
+    const status = row.getAttribute("data-status") || "";
+    const match = term.length === 0 || model.includes(term) || status.includes(term);
+    row.style.display = match ? "" : "none";
+  });
+}
+window.filterCaseItems = filterCaseItems;
+
 function renderCaseGroup(atendNum, items){
   const first = items[0];
   const cliente = getCol(first, "Cliente");
@@ -362,13 +379,14 @@ function renderCaseGroup(atendNum, items){
   let statusBadge;
   if(denied === 0) statusBadge = {cls:"ok", text:"Aprovado"};
   else if(approved === 0) statusBadge = {cls:"bad", text:"Negado"};
-  else statusBadge = {cls:"mixed", text:approved + " aprov. / " + denied + " neg."};
+  else statusBadge = {cls:"mixed", text:approved + " aprovado" + (approved!==1?"s":"") + " / " + denied + " negado" + (denied!==1?"s":"")};
 
   const rowsHtml = items.map(r => {
     const badge = statusBadgeFromInfo(getCol(r,"Informações"), getCol(r,"Avaliação"));
+    const modelText = norm(getCol(r,"Model")) || "—";
     return `
-      <tr>
-        <td>${norm(getCol(r,"Model")) || "—"}</td>
+      <tr data-model="${upper(modelText)}" data-status="${upper(badge.text)}">
+        <td>${modelText}</td>
         <td style="font-family:var(--mono);font-size:12px;color:var(--muted)">${norm(getCol(r,"Bar Code")) || "—"}</td>
         <td>${norm(getCol(r,"Defect")) || "—"}</td>
         <td><span class="badge ${badge.cls}">${badge.text}</span></td>
@@ -393,6 +411,7 @@ function renderCaseGroup(atendNum, items){
           <div class="field"><div class="k">NF referência</div><div class="v">${nfRef || "—"}</div></div>
           <div class="field"><div class="k">Data NF referência</div><div class="v">${dataRef || "—"}</div></div>
         </div>
+        ${items.length > 1 ? `<div class="item-filter"><input type="text" placeholder="Filtrar itens por modelo ou status..." oninput="filterCaseItems('${id}', this.value)" onclick="event.stopPropagation()" /></div>` : ""}
         <table>
           <thead><tr><th>Modelo</th><th>Bar code</th><th>Defeito</th><th>Status</th><th>Reposição / crédito</th><th>Informações</th></tr></thead>
           <tbody>${rowsHtml}</tbody>
