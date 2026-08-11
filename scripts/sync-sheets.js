@@ -61,7 +61,7 @@ function parseCsv(text) {
 }
 
 function rowsToObjects(rows) {
-  const headers = rows[0];
+  const headers = rows[0].map((h) => h.trim());
   return rows.slice(1).map((r) => {
     const obj = {};
     headers.forEach((h, i) => {
