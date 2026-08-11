@@ -1,96 +1,458 @@
-// Roda em ambiente Node.js dentro do GitHub Actions (servidor, não navegador).
-// Por isso não sofre bloqueio de CORS: essa restrição só existe em navegadores.
-const https = require("https");
-const fs = require("fs");
-const path = require("path");
 
-const SHEET_ID = "1qKO5q0FRT7v-6tjX0EE5WaWn0r1TgICJ";
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Consulta RMA</title>
+<style>
+  :root{
+    --ink:#1c2230;
+    --paper:#f6f4ef;
+    --panel:#ffffff;
+    --line:#dcd8cd;
+    --muted:#6b6558;
+    --accent:#8a3b2f;
+    --ok:#2f6b4f;
+    --ok-bg:#e7f1ea;
+    --bad:#a13c3c;
+    --bad-bg:#f6e6e4;
+    --pending:#9a6b1f;
+    --pending-bg:#f5ecd9;
+    --radius:10px;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--paper);color:var(--ink);min-height:100vh}
+  .wrap{max-width:880px;margin:0 auto;padding:28px 20px 60px}
 
-// Uma entrada por aba a sincronizar. "file" é o nome do .json gerado em /data.
+  .brandbar{display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid var(--ink);padding-bottom:10px;margin-bottom:26px}
+  .brandbar .tag{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .brandbar h1{font-size:20px;margin:2px 0 0;letter-spacing:-0.01em}
+  .who{font-size:13px;color:var(--muted)}
+  .who button{margin-left:10px;border:none;background:none;color:var(--accent);cursor:pointer;font-size:13px;text-decoration:underline;padding:0}
+
+  .login-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:32px;max-width:380px;margin:60px auto 0;box-shadow:0 1px 0 rgba(0,0,0,.03)}
+  .login-card .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+  .login-card h2{margin:0 0 20px;font-size:19px}
+  label{display:block;font-size:12px;color:var(--muted);margin:14px 0 5px;font-weight:600}
+  select, input[type=password], input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:7px;font-size:15px;background:#fff;color:var(--ink)}
+  select:focus, input:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .btn{margin-top:20px;width:100%;background:var(--ink);color:#fff;border:none;padding:12px;border-radius:7px;font-size:14px;font-weight:600;cursor:pointer}
+  .btn:hover{background:#000}
+  .btn.secondary{background:transparent;color:var(--ink);border:1px solid var(--line);width:auto;padding:8px 16px;margin-top:0}
+  .err{color:var(--bad);font-size:13px;margin-top:12px;min-height:1em}
+  .linklike{background:none;border:none;color:var(--accent);text-decoration:underline;font-size:12.5px;cursor:pointer;padding:0;margin-top:18px;display:inline-block}
+
+  .search-row{display:flex;gap:10px;margin-bottom:6px}
+  .search-row input{flex:1;font-family:var(--mono);font-size:16px;letter-spacing:.02em}
+  .hint{font-size:12px;color:var(--muted);margin-bottom:28px}
+
+  .status-line{font-size:13px;color:var(--muted);margin:14px 0 22px;display:flex;align-items:center;gap:8px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .dot.loading{background:var(--pending)}
+  .dot.error{background:var(--bad)}
+
+  .case{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:10px;overflow:hidden}
+  .case-summary{display:grid;grid-template-columns:1.6fr 1fr 0.8fr 0.9fr auto;gap:14px;align-items:center;padding:14px 18px;cursor:pointer}
+  .case-summary:hover{background:#faf9f6}
+  .case-summary .c-cliente{font-weight:600;font-size:14px}
+  .case-summary .c-atend{font-family:var(--mono);font-size:13px;color:var(--muted)}
+  .case-summary .c-data{font-size:13px;color:var(--muted)}
+  .case-summary .chev{font-size:12px;color:var(--muted);transition:transform .15s}
+  .case.open .case-summary .chev{transform:rotate(90deg)}
+  .case-body{display:none;border-top:1px solid var(--line)}
+  .case.open .case-body{display:block}
+  .badge.mixed{background:var(--pending-bg);color:var(--pending)}
+  .case-head{padding:20px 22px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:14px 24px}
+  .case-head .full{grid-column:1/-1}
+  .field .k{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:3px}
+  .field .v{font-size:14.5px}
+  .field .v.big{font-family:var(--mono);font-size:17px;font-weight:700}
+
+  table{width:100%;border-collapse:collapse}
+  thead th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:10px 14px;border-bottom:1px solid var(--line);font-weight:600}
+  tbody td{padding:12px 14px;font-size:13.5px;border-bottom:1px solid #eeece5;vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#faf9f6}
+
+  .badge{display:inline-block;padding:3px 9px;border-radius:100px;font-size:11.5px;font-weight:700;letter-spacing:.02em}
+  .badge.ok{background:var(--ok-bg);color:var(--ok)}
+  .badge.bad{background:var(--bad-bg);color:var(--bad)}
+
+  .empty, .noresult{text-align:center;padding:60px 20px;color:var(--muted)}
+  .noresult .big{font-size:15px;color:var(--ink);margin-bottom:6px;font-weight:600}
+
+  .footer-note{font-size:12px;color:var(--muted);margin-top:36px;line-height:1.6;border-top:1px solid var(--line);padding-top:16px}
+
+  .admin-table{width:100%;border-collapse:collapse;margin-top:18px}
+  .admin-table th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--muted);padding:8px 10px;border-bottom:1px solid var(--line)}
+  .admin-table td{padding:8px 10px;font-size:14px;border-bottom:1px solid #eeece5}
+  .admin-table td.pw{font-family:var(--mono);font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script>
+/* =========================================================================
+   CONFIG
+   ========================================================================= */
 const SOURCES = [
-  { label: "RMA 2026", gid: "1842889971", file: "rma-2026.json" },
-  // { label: "RMA 2025", gid: "SUBSTITUIR", file: "rma-2025.json" },
+  { label: "RMA 2026", file: "data/rma-2026.json" },
 ];
 
-function fetchCsv(url, redirectsLeft = 5) {
-  return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
-      if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location && redirectsLeft > 0) {
-        res.resume();
-        resolve(fetchCsv(res.headers.location, redirectsLeft - 1));
-        return;
-      }
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode} ao buscar ${url}`));
-        return;
-      }
-      let data = "";
-      res.setEncoding("utf8");
-      res.on("data", (chunk) => (data += chunk));
-      res.on("end", () => resolve(data));
-    }).on("error", reject);
-  });
-}
+const ATENDIMENTO_KEYS = ["N.º Atendimento", "Número Atendimento", "Numero Atendimento", "Nº Atendimento", "N° Atendimento"];
 
-// Parser CSV simples, compatível com RFC 4180 (lida com aspas e vírgulas dentro de campos).
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let field = "";
-  let inQuotes = false;
+const ADMIN_PASSWORD = "trocar-depois-123";
 
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; }
-        else { inQuotes = false; }
-      } else {
-        field += c;
-      }
-    } else {
-      if (c === '"') inQuotes = true;
-      else if (c === ",") { row.push(field); field = ""; }
-      else if (c === "\r") { /* ignora */ }
-      else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
-      else field += c;
-    }
+const PASSWORD_SALT = "rma-portal-v1";
+
+/* ========================================================================= */
+
+const state = {
+  screen: "loading",
+  user: null,
+  rows: [],
+  vendors: [],
+  loadError: "",
+  adminErr: "",
+  _search: "",
+};
+
+const app = document.getElementById("app");
+
+function norm(s){ return (s||"").toString().trim(); }
+function upper(s){ return norm(s).toUpperCase(); }
+
+function genPassword(name){
+  const str = PASSWORD_SALT + "::" + upper(name);
+  let hash = 0;
+  for(let i=0;i<str.length;i++){
+    hash = (Math.imul(31, hash) + str.charCodeAt(i)) | 0;
   }
-  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
-  return rows.filter((r) => r.some((cell) => cell !== ""));
+  const positive = (hash >>> 0);
+  return positive.toString(36).toUpperCase().slice(-6).padStart(6, "0");
 }
 
-function rowsToObjects(rows) {
-  const headers = rows[0];
-  return rows.slice(1).map((r) => {
-    const obj = {};
-    headers.forEach((h, i) => {
-      if (h) obj[h] = r[i] !== undefined ? r[i] : "";
+function getCol(row, ...names){
+  for(const n of names){
+    if(row[n] !== undefined && row[n] !== null) return row[n];
+  }
+  return "";
+}
+function getAtendimento(row){
+  return getCol(row, ...ATENDIMENTO_KEYS);
+}
+
+function loadAllSources(){
+  state.screen = "loading";
+  render();
+
+  if(SOURCES.length === 0){
+    state.screen = "error";
+    state.loadError = "Nenhuma fonte de dados configurada.";
+    render();
+    return;
+  }
+
+  Promise.all(SOURCES.map(src =>
+    fetch(src.file, { cache: "no-store" })
+      .then(r => {
+        if(!r.ok) throw new Error(`HTTP ${r.status} ao buscar ${src.file}`);
+        return r.json();
+      })
+      .then(payload => ({ src, payload }))
+  ))
+  .then(results => {
+    let allRows = [];
+    let latestSync = null;
+    results.forEach(({src, payload}) => {
+      const rows = (payload.rows || []).map(r => ({...r, __aba: src.label}));
+      allRows = allRows.concat(rows);
+      if(payload.generated_at){
+        const d = new Date(payload.generated_at);
+        if(!latestSync || d > latestSync) latestSync = d;
+      }
     });
-    return obj;
+    state.rows = allRows;
+    state.lastSync = latestSync;
+    const vendorSet = new Set();
+    allRows.forEach(r => {
+      const v = norm(getCol(r, "Vendedor"));
+      if(v) vendorSet.add(v);
+    });
+    state.vendors = Array.from(vendorSet).sort();
+    state.screen = "login";
+    render();
+  })
+  .catch(err => {
+    state.screen = "error";
+    state.loadError = "Não consegui carregar " + err.message + ". Verifique se o arquivo data/*.json existe no repositório e se o GitHub Actions já rodou pelo menos uma vez (aba 'Actions' do repositório).";
+    render();
   });
 }
 
-async function main() {
-  const outDir = path.join(__dirname, "..", "data");
-  fs.mkdirSync(outDir, { recursive: true });
-
-  for (const src of SOURCES) {
-    const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${src.gid}`;
-    console.log(`Sincronizando ${src.label}...`);
-    const csv = await fetchCsv(url);
-    const objects = rowsToObjects(parseCsv(csv));
-    const payload = {
-      label: src.label,
-      generated_at: new Date().toISOString(),
-      rows: objects,
-    };
-    fs.writeFileSync(path.join(outDir, src.file), JSON.stringify(payload));
-    console.log(`  -> ${objects.length} linhas salvas em data/${src.file}`);
+function handleLogin(name, pass){
+  const el = document.getElementById("login-err");
+  if(!name){ el.textContent = "Selecione seu nome."; return; }
+  if(genPassword(name) !== upper(pass)){
+    el.textContent = "Senha incorreta.";
+    return;
   }
+  state.user = name;
+  state.screen = "app";
+  render();
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+function handleAdminLogin(pass){
+  if(pass !== ADMIN_PASSWORD){
+    state.adminErr = "Senha de administrador incorreta.";
+    render();
+    return;
+  }
+  state.adminErr = "";
+  state.screen = "admin";
+  render();
+}
+
+function handleLogout(){
+  state.user = null;
+  state.screen = "login";
+  state._search = "";
+  render();
+}
+
+function renderLoading(){
+  app.innerHTML = `
+    <div class="brandbar"><div><div class="tag">Consulta de Atendimentos</div><h1>Portal RMA</h1></div></div>
+    <div class="empty">Carregando dados da planilha...</div>
+  `;
+}
+
+function renderErrorScreen(){
+  app.innerHTML = `
+    <div class="brandbar"><div><div class="tag">Consulta de Atendimentos</div><h1>Portal RMA</h1></div></div>
+    <div class="empty" style="color:var(--bad)">${state.loadError}</div>
+    <div style="text-align:center"><button class="btn secondary" id="btn-retry">Tentar novamente</button></div>
+  `;
+  document.getElementById("btn-retry").onclick = loadAllSources;
+}
+
+function renderLogin(){
+  app.innerHTML = `
+    <div class="brandbar"><div><div class="tag">Consulta de Atendimentos</div><h1>Portal RMA</h1></div></div>
+    <div class="login-card">
+      <div class="eyebrow">Acesso do vendedor</div>
+      <h2>Entrar</h2>
+      <label for="sel-name">Seu nome</label>
+      <select id="sel-name">
+        <option value="">Selecione...</option>
+        ${state.vendors.map(n => `<option value="${n}">${n}</option>`).join("")}
+      </select>
+      <label for="inp-pass">Senha</label>
+      <input type="password" id="inp-pass" placeholder="••••••" />
+      <button class="btn" id="btn-login">Entrar</button>
+      <div class="err" id="login-err"></div>
+      <button class="linklike" id="btn-admin-toggle">Sou administrador</button>
+      <div id="admin-box" style="display:none;margin-top:10px">
+        <input type="password" id="inp-admin-pass" placeholder="Senha de administrador" />
+        <button class="btn secondary" style="margin-top:8px" id="btn-admin-login">Ver lista de senhas</button>
+        <div class="err">${state.adminErr}</div>
+      </div>
+    </div>
+    <div class="footer-note">
+      Este acesso separa os atendimentos por vendedor apenas para uso normal do dia a dia — não é uma
+      camada de segurança contra acesso técnico avançado. Cada vendedor só vê os atendimentos em que
+      aparece como responsável na planilha. A lista de vendedores é lida automaticamente da coluna
+      "Vendedor" das abas configuradas.
+    </div>
+  `;
+  const doLogin = () => handleLogin(document.getElementById("sel-name").value, document.getElementById("inp-pass").value);
+  document.getElementById("btn-login").onclick = doLogin;
+  document.getElementById("inp-pass").addEventListener("keydown", (e) => { if(e.key === "Enter") doLogin(); });
+  document.getElementById("btn-admin-toggle").onclick = () => {
+    document.getElementById("admin-box").style.display = "block";
+  };
+  document.getElementById("btn-admin-login").onclick = () => handleAdminLogin(document.getElementById("inp-admin-pass").value);
+}
+
+function renderAdmin(){
+  app.innerHTML = `
+    <div class="brandbar">
+      <div><div class="tag">Consulta de Atendimentos</div><h1>Portal RMA — Administração</h1></div>
+      <div class="who"><button id="btn-back">voltar</button></div>
+    </div>
+    <p style="font-size:13px;color:var(--muted)">
+      ${state.vendors.length} vendedor(es) encontrados nas abas: ${SOURCES.map(s=>s.label).join(", ")}.
+      Distribua a senha de cada um pelo canal que preferir.
+    </p>
+    <table class="admin-table">
+      <thead><tr><th>Vendedor</th><th>Senha</th></tr></thead>
+      <tbody>
+        ${state.vendors.map(v => `<tr><td>${v}</td><td class="pw">${genPassword(v)}</td></tr>`).join("")}
+      </tbody>
+    </table>
+    <div class="footer-note">
+      As senhas são geradas automaticamente a partir do nome do vendedor + uma "chave" fixa no código
+      (PASSWORD_SALT). Se um novo vendedor aparecer na planilha, a senha dele já existe — é só ele
+      selecionar o nome e usar a senha mostrada aqui.
+    </div>
+  `;
+  document.getElementById("btn-back").onclick = () => { state.screen = "login"; render(); };
+}
+
+function statusBadgeFromInfo(info, avaliacao){
+  const i = upper(info);
+  const a = upper(avaliacao);
+  if(a.startsWith("NO") || i.includes("NEGADO")) return {cls:"bad", text:"Negado"};
+  return {cls:"ok", text:"Aprovado"};
+}
+
+function resolutionText(row){
+  const nf = upper(getCol(row,"NF Ressarc."));
+  const valor = norm(getCol(row,"Valor p/ Ressarc."));
+  const data = norm(getCol(row,"Data do ressarc."));
+  if(nf.includes("NEGADO")) return "Negado — sem reposição ou crédito";
+  if(nf.includes("CRÉDITO") || nf.includes("CREDITO")) return `Crédito gerado${valor ? " — " + valor : ""}${data ? " em " + data : ""}`;
+  if(nf) return `Nota de ressarcimento ${nf}${valor ? " — " + valor : ""}${data ? " em " + data : ""}`;
+  return "—";
+}
+
+function groupId(atendNum, aba){
+  return "case-" + (atendNum + "-" + aba).replace(/[^a-zA-Z0-9]/g, "");
+}
+
+function toggleCase(id){
+  const el = document.getElementById(id);
+  if(el) el.classList.toggle("open");
+}
+window.toggleCase = toggleCase;
+
+function renderCaseGroup(atendNum, items){
+  const first = items[0];
+  const cliente = getCol(first, "Cliente");
+  const cod = getCol(first, "Cód.Cliente");
+  const recebimento = getCol(first, "Recebimento");
+  const inicio = getCol(first, "Início da avaliação");
+  const termino = getCol(first, "Término da avaliação");
+  const nfRef = getCol(first, "NF Referencia");
+  const dataRef = getCol(first, "Data NF Referencia");
+  const aba = first.__aba;
+  const id = groupId(atendNum, aba);
+
+  const approved = items.filter(r => !upper(getCol(r,"Avaliação")).startsWith("NO")).length;
+  const denied = items.length - approved;
+  let statusBadge;
+  if(denied === 0) statusBadge = {cls:"ok", text:"Aprovado"};
+  else if(approved === 0) statusBadge = {cls:"bad", text:"Negado"};
+  else statusBadge = {cls:"mixed", text:approved + " aprov. / " + denied + " neg."};
+
+  const rowsHtml = items.map(r => {
+    const badge = statusBadgeFromInfo(getCol(r,"Informações"), getCol(r,"Avaliação"));
+    return `
+      <tr>
+        <td>${norm(getCol(r,"Model")) || "—"}</td>
+        <td style="font-family:var(--mono);font-size:12px;color:var(--muted)">${norm(getCol(r,"Bar Code")) || "—"}</td>
+        <td>${norm(getCol(r,"Defect")) || "—"}</td>
+        <td><span class="badge ${badge.cls}">${badge.text}</span></td>
+        <td>${resolutionText(r)}</td>
+        <td>${norm(getCol(r,"Informações")) || "—"}</td>
+      </tr>`;
+  }).join("");
+
+  return `
+    <div class="case" id="${id}">
+      <div class="case-summary" onclick="toggleCase('${id}')">
+        <div class="c-cliente">${cliente || "—"}</div>
+        <div class="c-atend">${atendNum}</div>
+        <div class="c-data">${recebimento || "—"}</div>
+        <div><span class="badge ${statusBadge.cls}">${statusBadge.text}</span></div>
+        <div class="chev">▶</div>
+      </div>
+      <div class="case-body">
+        <div class="case-head">
+          <div class="field"><div class="k">Código do cliente</div><div class="v">${cod || "—"}</div></div>
+          <div class="field"><div class="k">Aba</div><div class="v">${aba || "—"}</div></div>
+          <div class="field"><div class="k">Início / término avaliação</div><div class="v">${inicio || "—"} → ${termino || "—"}</div></div>
+          <div class="field"><div class="k">NF referência</div><div class="v">${nfRef || "—"}</div></div>
+          <div class="field"><div class="k">Data NF referência</div><div class="v">${dataRef || "—"}</div></div>
+        </div>
+        <table>
+          <thead><tr><th>Modelo</th><th>Bar code</th><th>Defeito</th><th>Status</th><th>Reposição / crédito</th><th>Informações</th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function renderApp(){
+  const search = state._search || "";
+  let resultsHtml = "";
+
+  const mine = state.rows.filter(r => upper(getCol(r,"Vendedor")) === upper(state.user));
+  const term = upper(search.trim());
+  const matches = term.length === 0
+    ? mine
+    : mine.filter(r => upper(getAtendimento(r)).includes(term) || upper(getCol(r,"Cliente")).includes(term));
+
+  if(matches.length === 0){
+    resultsHtml = `<div class="noresult"><div class="big">Nenhum atendimento encontrado</div>Confira o número ou nome digitado — a busca considera apenas atendimentos vinculados ao seu nome.</div>`;
+  } else {
+    const groups = {};
+    matches.forEach(r => {
+      const key = getAtendimento(r) + "|" + r.__aba;
+      if(!groups[key]) groups[key] = [];
+      groups[key].push(r);
+    });
+    const listHeader = `
+      <div class="case-summary" style="cursor:default;padding:0 18px 8px">
+        <div class="k">Cliente</div><div class="k">Atendimento</div><div class="k">Data</div><div class="k">Status</div><div></div>
+      </div>`;
+    // Mais recentes primeiro (ordem inversa à da planilha)
+    resultsHtml = listHeader + Object.entries(groups).reverse().map(([key, items]) => renderCaseGroup(key.split("|")[0], items)).join("");
+  }
+
+  app.innerHTML = `
+    <div class="brandbar">
+      <div><div class="tag">Consulta de Atendimentos</div><h1>Portal RMA</h1></div>
+      <div class="who">${state.user}<button id="btn-logout">sair</button></div>
+    </div>
+
+    <div class="search-row">
+      <input type="text" id="inp-search" placeholder="Buscar por número do atendimento ou nome do cliente" value="${search}" />
+    </div>
+    <div class="hint">Mostrando todos os seus atendimentos, ${state.user}. Digite acima para filtrar.</div>
+
+    <div class="status-line">
+      <span class="dot"></span>
+      ${state.lastSync ? "Dados de " + state.lastSync.toLocaleString("pt-BR") : "Dados sincronizados"}
+      <button class="btn secondary" style="margin-left:auto" id="btn-refresh">Atualizar</button>
+    </div>
+
+    ${resultsHtml}
+
+    <div class="footer-note">Os dados são sincronizados automaticamente a cada 15 minutos. Clique em "Atualizar" para buscar a versão mais recente já sincronizada.</div>
+  `;
+
+  document.getElementById("btn-logout").onclick = handleLogout;
+  document.getElementById("btn-refresh").onclick = () => loadAllSources();
+  const inp = document.getElementById("inp-search");
+  inp.oninput = (e) => { state._search = e.target.value; render(); };
+  inp.focus();
+  inp.value = search;
+  inp.selectionStart = inp.selectionEnd = inp.value.length;
+}
+
+function render(){
+  if(state.screen === "loading") renderLoading();
+  else if(state.screen === "error") renderErrorScreen();
+  else if(state.screen === "login") renderLogin();
+  else if(state.screen === "admin") renderAdmin();
+  else if(state.screen === "app") renderApp();
+}
+
+loadAllSources();
+</script>
+</body>
+</html>
