@@ -4,6 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <title>Consulta RMA</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --ink:#0c2f42;
@@ -67,9 +68,10 @@
   .case.open .case-summary .chev{transform:rotate(90deg)}
   .case-body{display:none;border-top:1px solid var(--line)}
   .case.open .case-body{display:block}
-  .item-filter{padding:12px 26px 0}
-  .item-filter input{width:100%;max-width:320px;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font-size:13px;font-family:var(--sans);color:var(--ink)}
-  .item-filter input:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .item-toolbar{display:flex;gap:10px;align-items:center;padding:12px 26px 0;flex-wrap:wrap}
+  .item-toolbar .item-filter-input{flex:1;min-width:220px;max-width:320px;padding:8px 12px;border:1px solid var(--line);border-radius:7px;font-size:13px;font-family:var(--sans);color:var(--ink)}
+  .item-toolbar .item-filter-input:focus{outline:2px solid var(--accent);outline-offset:1px}
+  .export-btn{margin-top:0 !important;width:auto !important;padding:8px 14px !important;font-size:13px !important;white-space:nowrap}
   .badge.mixed{background:var(--pending-bg);color:var(--pending)}
   .case-head{padding:22px 26px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:repeat(3, 1fr);gap:18px 32px}
   .case-head .full{grid-column:1/-1}
@@ -321,18 +323,22 @@ function renderAdmin(){
   document.getElementById("btn-back").onclick = () => { state.screen = "login"; render(); };
 }
 
-function statusBadgeFromInfo(info, avaliacao){
-  const i = upper(info);
-  const a = upper(avaliacao);
-  if(a.startsWith("NO") || i.includes("NEGADO")) return {cls:"bad", text:"Negado"};
-  return {cls:"ok", text:"Aprovado"};
+function isItemDenied(row){
+  const avaliacao = upper(getCol(row, "Avaliação"));
+  const nf = upper(getCol(row, "NF Ressarc."));
+  const info = upper(getCol(row, "Informações"));
+  return avaliacao.startsWith("NO") || nf.includes("NEGADO") || info.includes("NEGADO");
+}
+
+function statusBadgeFor(row){
+  return isItemDenied(row) ? {cls:"bad", text:"Negado"} : {cls:"ok", text:"Aprovado"};
 }
 
 function resolutionText(row){
   const nf = upper(getCol(row,"NF Ressarc."));
   const valor = norm(getCol(row,"Valor p/ Ressarc."));
   const data = norm(getCol(row,"Data do ressarc."));
-  if(nf.includes("NEGADO")) return "Negado — sem reposição ou crédito";
+  if(isItemDenied(row)) return "Negado — sem reposição ou crédito";
   if(nf.includes("CRÉDITO") || nf.includes("CREDITO")) return `Crédito gerado${valor ? " — " + valor : ""}${data ? " em " + data : ""}`;
   if(nf) return `Nota de ressarcimento ${nf}${valor ? " — " + valor : ""}${data ? " em " + data : ""}`;
   return "—";
@@ -362,6 +368,15 @@ function filterCaseItems(id, value){
 }
 window.filterCaseItems = filterCaseItems;
 
+function exportCaseExcel(id, atendNum){
+  const table = document.querySelector(`#${id} table`);
+  if(!table || typeof XLSX === "undefined") return;
+  const wb = XLSX.utils.table_to_book(table, { sheet: "Itens" });
+  const safeName = ("atendimento-" + atendNum).replace(/[^a-zA-Z0-9-]/g, "_");
+  XLSX.writeFile(wb, safeName + ".xlsx");
+}
+window.exportCaseExcel = exportCaseExcel;
+
 function renderCaseGroup(atendNum, items){
   const first = items[0];
   const cliente = getCol(first, "Cliente");
@@ -374,7 +389,7 @@ function renderCaseGroup(atendNum, items){
   const aba = first.__aba;
   const id = groupId(atendNum, aba);
 
-  const approved = items.filter(r => !upper(getCol(r,"Avaliação")).startsWith("NO")).length;
+  const approved = items.filter(r => !isItemDenied(r)).length;
   const denied = items.length - approved;
   let statusBadge;
   if(denied === 0) statusBadge = {cls:"ok", text:"Aprovado"};
@@ -382,7 +397,7 @@ function renderCaseGroup(atendNum, items){
   else statusBadge = {cls:"mixed", text:approved + " aprovado" + (approved!==1?"s":"") + " / " + denied + " negado" + (denied!==1?"s":"")};
 
   const rowsHtml = items.map(r => {
-    const badge = statusBadgeFromInfo(getCol(r,"Informações"), getCol(r,"Avaliação"));
+    const badge = statusBadgeFor(r);
     const modelText = norm(getCol(r,"Model")) || "—";
     return `
       <tr data-model="${upper(modelText)}" data-status="${upper(badge.text)}">
@@ -411,7 +426,10 @@ function renderCaseGroup(atendNum, items){
           <div class="field"><div class="k">NF referência</div><div class="v">${nfRef || "—"}</div></div>
           <div class="field"><div class="k">Data NF referência</div><div class="v">${dataRef || "—"}</div></div>
         </div>
-        ${items.length > 1 ? `<div class="item-filter"><input type="text" placeholder="Filtrar itens por modelo ou status..." oninput="filterCaseItems('${id}', this.value)" onclick="event.stopPropagation()" /></div>` : ""}
+        <div class="item-toolbar">
+          <input type="text" class="item-filter-input" placeholder="Filtrar itens por modelo ou status..." oninput="filterCaseItems('${id}', this.value)" onclick="event.stopPropagation()" />
+          <button class="btn secondary export-btn" onclick="event.stopPropagation(); exportCaseExcel('${id}', '${atendNum.replace(/'/g, "\\'")}')">Exportar Excel</button>
+        </div>
         <table>
           <thead><tr><th>Modelo</th><th>Bar code</th><th>Defeito</th><th>Status</th><th>Reposição / crédito</th><th>Informações</th></tr></thead>
           <tbody>${rowsHtml}</tbody>
