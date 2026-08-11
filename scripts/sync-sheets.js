@@ -112,7 +112,9 @@ async function main() {
     const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${src.gid}`;
     console.log(`Sincronizando ${src.label}...`);
     const csv = await fetchCsv(url);
-    const objects = forwardFillMerged(rowsToObjects(parseCsv(csv)));
+    const parsedRows = parseCsv(csv);
+    console.log("Cabeçalhos encontrados:", JSON.stringify(parsedRows[0]));
+    const objects = forwardFillMerged(rowsToObjects(parsedRows));
     const payload = {
       label: src.label,
       generated_at: new Date().toISOString(),
