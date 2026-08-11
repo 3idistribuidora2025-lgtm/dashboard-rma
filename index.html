@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -51,7 +52,17 @@
   .dot.loading{background:var(--pending)}
   .dot.error{background:var(--bad)}
 
-  .case{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:22px;overflow:hidden}
+  .case{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:10px;overflow:hidden}
+  .case-summary{display:grid;grid-template-columns:1.6fr 1fr 0.8fr 0.9fr auto;gap:14px;align-items:center;padding:14px 18px;cursor:pointer}
+  .case-summary:hover{background:#faf9f6}
+  .case-summary .c-cliente{font-weight:600;font-size:14px}
+  .case-summary .c-atend{font-family:var(--mono);font-size:13px;color:var(--muted)}
+  .case-summary .c-data{font-size:13px;color:var(--muted)}
+  .case-summary .chev{font-size:12px;color:var(--muted);transition:transform .15s}
+  .case.open .case-summary .chev{transform:rotate(90deg)}
+  .case-body{display:none;border-top:1px solid var(--line)}
+  .case.open .case-body{display:block}
+  .badge.mixed{background:var(--pending-bg);color:var(--pending)}
   .case-head{padding:20px 22px;border-bottom:1px solid var(--line);display:grid;grid-template-columns:1fr 1fr;gap:14px 24px}
   .case-head .full{grid-column:1/-1}
   .field .k{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:3px}
@@ -307,6 +318,16 @@ function resolutionText(row){
   return "—";
 }
 
+function groupId(atendNum, aba){
+  return "case-" + (atendNum + "-" + aba).replace(/[^a-zA-Z0-9]/g, "");
+}
+
+function toggleCase(id){
+  const el = document.getElementById(id);
+  if(el) el.classList.toggle("open");
+}
+window.toggleCase = toggleCase;
+
 function renderCaseGroup(atendNum, items){
   const first = items[0];
   const cliente = getCol(first, "Cliente");
@@ -317,9 +338,14 @@ function renderCaseGroup(atendNum, items){
   const nfRef = getCol(first, "NF Referencia");
   const dataRef = getCol(first, "Data NF Referencia");
   const aba = first.__aba;
+  const id = groupId(atendNum, aba);
 
   const approved = items.filter(r => !upper(getCol(r,"Avaliação")).startsWith("NO")).length;
   const denied = items.length - approved;
+  let statusBadge;
+  if(denied === 0) statusBadge = {cls:"ok", text:"Aprovado"};
+  else if(approved === 0) statusBadge = {cls:"bad", text:"Negado"};
+  else statusBadge = {cls:"mixed", text:approved + " aprov. / " + denied + " neg."};
 
   const rowsHtml = items.map(r => {
     const badge = statusBadgeFromInfo(getCol(r,"Informações"), getCol(r,"Avaliação"));
@@ -335,23 +361,27 @@ function renderCaseGroup(atendNum, items){
   }).join("");
 
   return `
-    <div class="case">
-      <div class="case-head">
-        <div class="field full">
-          <div class="k">Atendimento ${aba ? "· " + aba : ""}</div>
-          <div class="v big">${atendNum} — ${approved} aprovado${approved!==1?"s":""}, ${denied} negado${denied!==1?"s":""}</div>
-        </div>
-        <div class="field"><div class="k">Cliente</div><div class="v">${cliente || "—"}</div></div>
-        <div class="field"><div class="k">Código do cliente</div><div class="v">${cod || "—"}</div></div>
-        <div class="field"><div class="k">Recebimento</div><div class="v">${recebimento || "—"}</div></div>
-        <div class="field"><div class="k">Início / término avaliação</div><div class="v">${inicio || "—"} → ${termino || "—"}</div></div>
-        <div class="field"><div class="k">NF referência</div><div class="v">${nfRef || "—"}</div></div>
-        <div class="field"><div class="k">Data NF referência</div><div class="v">${dataRef || "—"}</div></div>
+    <div class="case" id="${id}">
+      <div class="case-summary" onclick="toggleCase('${id}')">
+        <div class="c-cliente">${cliente || "—"}</div>
+        <div class="c-atend">${atendNum}</div>
+        <div class="c-data">${recebimento || "—"}</div>
+        <div><span class="badge ${statusBadge.cls}">${statusBadge.text}</span></div>
+        <div class="chev">▶</div>
       </div>
-      <table>
-        <thead><tr><th>Modelo</th><th>Bar code</th><th>Defeito</th><th>Status</th><th>Reposição / crédito</th><th>Informações</th></tr></thead>
-        <tbody>${rowsHtml}</tbody>
-      </table>
+      <div class="case-body">
+        <div class="case-head">
+          <div class="field"><div class="k">Código do cliente</div><div class="v">${cod || "—"}</div></div>
+          <div class="field"><div class="k">Aba</div><div class="v">${aba || "—"}</div></div>
+          <div class="field"><div class="k">Início / término avaliação</div><div class="v">${inicio || "—"} → ${termino || "—"}</div></div>
+          <div class="field"><div class="k">NF referência</div><div class="v">${nfRef || "—"}</div></div>
+          <div class="field"><div class="k">Data NF referência</div><div class="v">${dataRef || "—"}</div></div>
+        </div>
+        <table>
+          <thead><tr><th>Modelo</th><th>Bar code</th><th>Defeito</th><th>Status</th><th>Reposição / crédito</th><th>Informações</th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
     </div>
   `;
 }
@@ -360,20 +390,27 @@ function renderApp(){
   const search = state._search || "";
   let resultsHtml = "";
 
-  if(search.trim().length > 0){
-    const mine = state.rows.filter(r => upper(getCol(r,"Vendedor")) === upper(state.user));
-    const matches = mine.filter(r => upper(getAtendimento(r)).includes(upper(search)));
-    if(matches.length === 0){
-      resultsHtml = `<div class="noresult"><div class="big">Nenhum atendimento encontrado</div>Confira o número digitado — a busca considera apenas atendimentos vinculados ao seu nome.</div>`;
-    } else {
-      const groups = {};
-      matches.forEach(r => {
-        const key = getAtendimento(r) + "|" + r.__aba;
-        if(!groups[key]) groups[key] = [];
-        groups[key].push(r);
-      });
-      resultsHtml = Object.entries(groups).map(([key, items]) => renderCaseGroup(key.split("|")[0], items)).join("");
-    }
+  const mine = state.rows.filter(r => upper(getCol(r,"Vendedor")) === upper(state.user));
+  const term = upper(search.trim());
+  const matches = term.length === 0
+    ? mine
+    : mine.filter(r => upper(getAtendimento(r)).includes(term) || upper(getCol(r,"Cliente")).includes(term));
+
+  if(matches.length === 0){
+    resultsHtml = `<div class="noresult"><div class="big">Nenhum atendimento encontrado</div>Confira o número ou nome digitado — a busca considera apenas atendimentos vinculados ao seu nome.</div>`;
+  } else {
+    const groups = {};
+    matches.forEach(r => {
+      const key = getAtendimento(r) + "|" + r.__aba;
+      if(!groups[key]) groups[key] = [];
+      groups[key].push(r);
+    });
+    const listHeader = `
+      <div class="case-summary" style="cursor:default;padding:0 18px 8px">
+        <div class="k">Cliente</div><div class="k">Atendimento</div><div class="k">Data</div><div class="k">Status</div><div></div>
+      </div>`;
+    // Mais recentes primeiro (ordem inversa à da planilha)
+    resultsHtml = listHeader + Object.entries(groups).reverse().map(([key, items]) => renderCaseGroup(key.split("|")[0], items)).join("");
   }
 
   app.innerHTML = `
@@ -383,9 +420,9 @@ function renderApp(){
     </div>
 
     <div class="search-row">
-      <input type="text" id="inp-search" placeholder="Digite o número do atendimento (ex: 9242/2978)" value="${search}" />
+      <input type="text" id="inp-search" placeholder="Buscar por número do atendimento ou nome do cliente" value="${search}" />
     </div>
-    <div class="hint">Mostra apenas atendimentos vinculados a você, ${state.user}.</div>
+    <div class="hint">Mostrando todos os seus atendimentos, ${state.user}. Digite acima para filtrar.</div>
 
     <div class="status-line">
       <span class="dot"></span>
