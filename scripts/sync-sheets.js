@@ -9,7 +9,7 @@ const SHEET_ID = "1qKO5q0FRT7v-6tjX0EE5WaWn0r1TgICJ";
 // Uma entrada por aba a sincronizar. "file" é o nome do .json gerado em /data.
 const SOURCES = [
   { label: "RMA 2026", gid: "1842889971", file: "rma-2026.json" },
-  // { label: "RMA 2025", gid: "SUBSTITUIR", file: "rma-2025.json" },
+  { label: "RMA 2025", gid: "1258947142", file: "rma-2025.json" },
 ];
 
 function fetchCsv(url, redirectsLeft = 5) {
